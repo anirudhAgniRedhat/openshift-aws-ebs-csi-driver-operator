@@ -12,3 +12,6 @@
 *.out
 
 _output
+
+#IDE
+.idea

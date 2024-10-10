@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
+	"k8s.io/client-go/kubernetes"
 	kubeclient "k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/rest"
@@ -147,6 +148,16 @@ func RunOperator(ctx context.Context, controllerConfig *controllercmd.Controller
 	// operator.openshift.io client, used for ClusterCSIDriver
 	guestCCDClient := opclient.NewForConfigOrDie(rest.AddUserAgent(guestKubeConfig, operatorName))
 	guestCCDInformers := opinformers.NewSharedInformerFactory(guestCCDClient, resync)
+
+	coreClient, err := kubernetes.NewForConfig(guestKubeConfig)
+	if err != nil {
+		klog.Fatalf("Error creating Kubernetes core client: %v", err)
+	}
+	// ebs tags controller client used for CSI Driver
+	ebsVolumeTagsClient, err := NewEBSVolumeTagController(guestConfigClient, coreClient.CoreV1(), nil)
+	if err != nil {
+		return err
+	}
 
 	// Create client and informers for our ClusterCSIDriver CR.
 	gvr := opv1.SchemeGroupVersion.WithResource("clustercsidrivers")
@@ -362,6 +373,7 @@ func RunOperator(ctx context.Context, controllerConfig *controllercmd.Controller
 
 	klog.Info("Starting guest cluster controllerset")
 	go guestCSIControllerSet.Run(ctx, 1)
+	go ebsVolumeTagsClient.Run(ctx.Done())
 
 	<-ctx.Done()
 
