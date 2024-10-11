@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"fmt"
+	"github.com/aws/aws-sdk-go/aws/session"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log"
 	"os"
@@ -33,9 +34,26 @@ type EBSVolumeTagController struct {
 }
 
 // NewEBSVolumeTagController sets up the custom controller with informers and event handlers
-func NewEBSVolumeTagController(configClient configclient.Interface, coreClient corev1.CoreV1Interface, awsEC2Client *ec2.EC2) (*EBSVolumeTagController, error) {
+func NewEBSVolumeTagController(configClient configclient.Interface, coreClient corev1.CoreV1Interface) (*EBSVolumeTagController, error) {
 	// Create a workqueue for rate-limiting
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
+
+	// Retrieve the AWS region from the Infrastructure resource
+	awsRegion, err := getAWSRegionFromInfrastructure(configClient)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving AWS region from infrastructure: %v", err)
+	}
+
+	// Initialize AWS session
+	awsSession, err := session.NewSession(&aws.Config{
+		Region: aws.String(awsRegion), // Region retrieved from the Infrastructure resource
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error creating AWS session: %v", err)
+	}
+
+	// Create AWS EC2 client
+	awsEC2Client := ec2.New(awsSession)
 
 	// Create a custom listerWatcher for the Infrastructure resource
 	listerWatcher := &cache.ListWatch{
@@ -66,7 +84,7 @@ func NewEBSVolumeTagController(configClient configclient.Interface, coreClient c
 	}
 
 	// Add event handlers to the informer
-	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			controller.handleAdd(obj)
 		},
@@ -82,6 +100,20 @@ func NewEBSVolumeTagController(configClient configclient.Interface, coreClient c
 	}
 
 	return controller, nil
+}
+
+// getAWSRegionFromInfrastructure retrieves the AWS region from the Infrastructure resource in OpenShift
+func getAWSRegionFromInfrastructure(configClient configclient.Interface) (string, error) {
+	infra, err := configClient.ConfigV1().Infrastructures().Get(context.TODO(), "cluster", metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to retrieve Infrastructure resource: %v", err)
+	}
+
+	if infra.Status.PlatformStatus == nil || infra.Status.PlatformStatus.AWS == nil {
+		return "", fmt.Errorf("AWS platform status not found in Infrastructure resource")
+	}
+
+	return infra.Status.PlatformStatus.AWS.Region, nil
 }
 
 // handleAdd is called when an Infrastructure resource is added

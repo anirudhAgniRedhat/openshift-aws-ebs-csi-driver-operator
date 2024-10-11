@@ -154,7 +154,7 @@ func RunOperator(ctx context.Context, controllerConfig *controllercmd.Controller
 		klog.Fatalf("Error creating Kubernetes core client: %v", err)
 	}
 	// ebs tags controller client used for CSI Driver
-	ebsVolumeTagsClient, err := NewEBSVolumeTagController(guestConfigClient, coreClient.CoreV1(), nil)
+	tagsControllerClient, err := NewEBSVolumeTagController(guestConfigClient, coreClient.CoreV1())
 	if err != nil {
 		return err
 	}
@@ -373,7 +373,7 @@ func RunOperator(ctx context.Context, controllerConfig *controllercmd.Controller
 
 	klog.Info("Starting guest cluster controllerset")
 	go guestCSIControllerSet.Run(ctx, 1)
-	go ebsVolumeTagsClient.Run(ctx.Done())
+	go tagsControllerClient.Run(ctx.Done())
 
 	<-ctx.Done()
 
